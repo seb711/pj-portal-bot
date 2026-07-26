@@ -14,6 +14,8 @@ REPO=${REPO:-"https://github.com/CHANGEME/pj-portal-bot.git"}
 INSTALL_DIR=${INSTALL_DIR:-/opt/pjportal}
 STATE_DIR=${STATE_DIR:-/var/lib/pjportal}
 ENV_FILE=${ENV_FILE:-/etc/pjportal.env}
+CRED_DIR=${CRED_DIR:-/etc/pjportal}
+PWD_CRED=${PWD_CRED:-$CRED_DIR/pjportal_pwd.cred}
 SVC_USER=${SVC_USER:-pjportal}
 
 if [[ $EUID -ne 0 ]]; then
@@ -54,14 +56,39 @@ if [[ ! -f "$ENV_FILE" ]]; then
   cat <<EOF
 
   Next step:
-    sudo nano $ENV_FILE   # fill in credentials
-    sudo bash $INSTALL_DIR/deploy/install.sh   # re-run to enable timer
+    sudo nano $ENV_FILE   # fill in non-secret config (user, hospital, ...)
+    sudo bash $INSTALL_DIR/deploy/install.sh   # re-run to encrypt password + enable timer
 
 EOF
   exit 0
 fi
 chmod 600 "$ENV_FILE"
 chown root:"$SVC_USER" "$ENV_FILE"
+
+echo "==> Verifying encrypted password credential"
+if ! command -v systemd-creds >/dev/null 2>&1; then
+  echo "ERROR: systemd-creds not found (needs systemd >= 250)." >&2
+  echo "       This VM's systemd is too old — use Ubuntu 24.04 for the encrypted-credential setup." >&2
+  exit 1
+fi
+mkdir -p "$CRED_DIR"
+chmod 700 "$CRED_DIR"
+if [[ ! -f "$PWD_CRED" ]]; then
+  echo
+  echo "Encrypting your pj-portal.de password with the machine's host key."
+  echo "Nothing is written to disk in plaintext — you can't recover this on another machine."
+  echo
+  read -rsp "pj-portal.de password: " PJP_PWD
+  echo
+  # Pipe via a heredoc-alike so the plaintext never touches a temp file
+  printf '%s' "$PJP_PWD" | systemd-creds encrypt --name=pjportal_pwd - "$PWD_CRED"
+  unset PJP_PWD
+  chmod 600 "$PWD_CRED"
+  chown root:root "$PWD_CRED"
+  echo "==> Encrypted password written to $PWD_CRED"
+else
+  echo "==> Existing encrypted password at $PWD_CRED (delete it to re-encrypt)"
+fi
 
 echo "==> Installing systemd units"
 install -m 644 "$INSTALL_DIR/deploy/pjportal.service" /etc/systemd/system/pjportal.service

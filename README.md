@@ -12,6 +12,7 @@ Universität Münster, RWTH Aachen, Universität Augsburg, Charité Berlin, MSB 
 - `pjportal.py` runs **once per invocation**: checks the merkliste for the configured PJ tag / hospital / term and pushes a notification if a slot is open. Then it exits.
 - A **systemd timer** re-fires the script every 60–360 seconds (matches the original random interval).
 - The `PHPSESSID` cookie is persisted to `/var/lib/pjportal/cookie.txt` so most runs skip the login round-trip.
+- Your **pj-portal.de password never touches the filesystem in plaintext**. It is sealed to the machine with `systemd-creds` and only decrypted into a tmpfs while the service is running. A stolen disk snapshot cannot be decrypted on another host.
 
 ## 1. Notification setup
 Pick at least one channel — the bot supports [Pushover](https://pushover.net) and [ntfy](https://ntfy.sh).
@@ -38,7 +39,7 @@ Pick at least one channel — the bot supports [Pushover](https://pushover.net) 
 ## 3. Create an Oracle Cloud Always Free VM
 1. Sign up at [oracle.com/cloud/free](https://www.oracle.com/cloud/free/). Credit card required for verification but never charged for Always Free resources.
 2. Console → **Compute → Instances → Create instance**.
-3. Image: **Ubuntu 22.04** (or 24.04). Shape: **VM.Standard.A1.Flex** (ARM) — assign 1 OCPU / 6 GB RAM. Plenty for this workload and leaves room for future projects.
+3. Image: **Ubuntu 24.04** (required — 22.04's systemd is too old for encrypted credentials). Shape: **VM.Standard.A1.Flex** (ARM) — assign 1 OCPU / 6 GB RAM. Plenty for this workload and leaves room for future projects.
 4. Add your SSH public key.
 5. Leave networking defaults — this workload only makes outbound calls, no inbound ports needed.
 6. Wait ~1 min for the VM to come up, then SSH in: `ssh ubuntu@<public-ip>`.
@@ -103,6 +104,44 @@ sudo bash /opt/pjportal/deploy/install.sh
 
 ### Testing notifications
 Set `pj_tag`, `hospital`, and `term` to a combination that you know currently has open slots. Then `sudo systemctl start pjportal.service`. You should get a push within a couple of seconds.
+
+## 6. Secret handling
+`install.sh` encrypts your pj-portal.de password with `systemd-creds` (host-key-sealed) and writes the ciphertext to `/etc/pjportal/pjportal_pwd.cred`. The plaintext never lands on disk. At service start systemd decrypts it into `/run/credentials/pjportal.service/pjportal_pwd`, which is a per-service tmpfs — gone when the unit stops.
+
+### Rotate the password
+```bash
+sudo rm /etc/pjportal/pjportal_pwd.cred
+sudo bash /opt/pjportal/deploy/install.sh   # prompts for the new one
+```
+
+### Encrypt other secrets (pushover_token, ntfy_url_topic, ...)
+```bash
+# 1. Encrypt
+sudo mkdir -p /etc/pjportal
+echo -n 'YOUR_PUSHOVER_TOKEN' | sudo systemd-creds encrypt --name=pushover_token - /etc/pjportal/pushover_token.cred
+sudo chmod 600 /etc/pjportal/pushover_token.cred
+
+# 2. Reference it from the service unit
+sudo systemctl edit pjportal.service
+# In the drop-in editor, add:
+#   [Service]
+#   LoadCredentialEncrypted=pushover_token:/etc/pjportal/pushover_token.cred
+
+# 3. Remove the plaintext value from /etc/pjportal.env
+sudo nano /etc/pjportal.env
+
+sudo systemctl daemon-reload
+```
+
+Any variable named the same as the credential (`pushover_token` here) will be picked up automatically — the Python code reads `$CREDENTIALS_DIRECTORY/<name>` before falling back to env.
+
+### Threat model
+| Attacker | Coverage |
+|---|---|
+| Non-root user on the VM reading `/etc/pjportal/*.cred` | Encrypted, unreadable |
+| Stolen disk image / snapshot mounted on another host | Sealed to this machine — unrecoverable |
+| Root on the running VM | Can read `/run/credentials/pjportal.service/*` while the service runs — inherent, no software fix |
+| Compromise of your Oracle account | Full VM access. Enable Oracle MFA. |
 
 ## Local development
 ```bash

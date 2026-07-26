@@ -13,6 +13,11 @@ ExecStart=/opt/pjportal/.venv/bin/python /opt/pjportal/pjportal.py
 StandardOutput=journal
 StandardError=journal
 
+# Encrypted secrets — decrypted into $CREDENTIALS_DIRECTORY at start, tmpfs, gone at stop.
+# Encrypt/rotate with: sudo systemd-creds encrypt --name=pjportal_pwd - /etc/pjportal/pjportal_pwd.cred
+# To also encrypt Pushover/ntfy tokens, drop additional LoadCredentialEncrypted= lines here.
+LoadCredentialEncrypted=pjportal_pwd:/etc/pjportal/pjportal_pwd.cred
+
 # Sandboxing — network only, no filesystem writes outside state dir
 NoNewPrivileges=true
 ProtectSystem=strict

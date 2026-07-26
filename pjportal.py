@@ -19,9 +19,26 @@ ENV_VAR_REQUIRED = ['pjportal_user', 'pjportal_pwd', 'ajax_uid', 'pj_tag', 'hosp
 ENV_VAR_list = ENV_VAR_REQUIRED + ENV_VAR_OPTIONAL
 ENV_VAR = {}
 
+
+def read_secret(name):
+    """Read a config value: prefer systemd-provided credential file, fall back to env var.
+
+    When systemd runs the unit with LoadCredentialEncrypted=, the decrypted value lands
+    at $CREDENTIALS_DIRECTORY/<name> on a tmpfs. For local dev without systemd,
+    plain env vars still work.
+    """
+    creds_dir = os.environ.get("CREDENTIALS_DIRECTORY")
+    if creds_dir:
+        path = os.path.join(creds_dir, name)
+        if os.path.exists(path):
+            with open(path) as f:
+                return f.read().strip()
+    return os.environ.get(name)
+
+
 def load_env():
     global ENV_VAR
-    ENV_VAR = {var_name: os.getenv(var_name) for var_name in ENV_VAR_list}
+    ENV_VAR = {var_name: read_secret(var_name) for var_name in ENV_VAR_list}
     missing_vars = [key for key, value in ENV_VAR.items() if key not in ENV_VAR_OPTIONAL and value is None]
     if missing_vars:
         raise ValueError(f"Error: Missing required environment variables: {', '.join(missing_vars)}")
@@ -152,15 +169,15 @@ def extract_table_from_response(response):
 
 
 def send_push_message(msg):
-    pushover_user = os.environ.get('pushover_user')
-    pushover_token = os.environ.get('pushover_token')
-    ntfy_url_topic = os.environ.get('ntfy_url_topic')
+    pushover_user = ENV_VAR.get('pushover_user')
+    pushover_token = ENV_VAR.get('pushover_token')
+    ntfy_url_topic = ENV_VAR.get('ntfy_url_topic')
     if pushover_user and pushover_token:
         send_pushover_notification(msg)
     if ntfy_url_topic:
         send_ntfy_notification(msg)
     if not (pushover_user and pushover_token) and not ntfy_url_topic:
-        logging.warning("No credentials for either Pushover or ntfy specified as env.")
+        logging.warning("No credentials for either Pushover or ntfy specified.")
 
 
 def send_pushover_notification(msg):
