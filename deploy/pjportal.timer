@@ -1,14 +1,15 @@
 [Unit]
-Description=Trigger PJ-Portal check with randomized interval
+Description=Trigger PJ-Portal check every 5 minutes
 
 [Timer]
-# Fire 30s after boot, then between 60s and 360s after each previous run
-# (matches the original random.randint(60, 360) behaviour).
+# Fire 30s after boot, then every 5 minutes with a small jitter so we don't
+# hammer the portal on the exact same wall-clock second on every VM.
 OnBootSec=30s
-OnUnitActiveSec=60s
-RandomizedDelaySec=300s
+OnUnitActiveSec=5min
+RandomizedDelaySec=30s
 Unit=pjportal.service
 AccuracySec=1s
+Persistent=true
 
 [Install]
 WantedBy=timers.target

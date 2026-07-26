@@ -113,6 +113,14 @@ install -m 644 "$INSTALL_DIR/deploy/pjportal.timer"   /etc/systemd/system/pjport
 systemctl daemon-reload
 systemctl enable --now pjportal.timer
 
+# Force a "bot armed" confirmation push on the very next run. The bot writes
+# this stamp itself after the first push; deleting it here re-arms the ping
+# so you can visually confirm the pipeline after every deploy.
+rm -f "$STATE_DIR/started.stamp"
+
+echo "==> Kicking one check now to trigger the start-ping and warm the cookie"
+systemctl start pjportal.service || true
+
 echo
 echo "Done. Useful commands:"
 echo "  systemctl status pjportal.timer"
