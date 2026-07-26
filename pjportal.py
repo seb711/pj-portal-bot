@@ -218,10 +218,15 @@ def run_main():
         session = get_auth_session_cookie(session)
         return session
 
-    def run_table_check(table_dict, pj_tag, hospital, term):
-        logging.info("Parsing data from request and checking the table...")
-        logging.info(table_dict)
-        result_tuple = table_dict[pj_tag][hospital][term]
+    def check_one(table_dict, pj_tag, hospital, term):
+        try:
+            result_tuple = table_dict[pj_tag][hospital][term]
+        except KeyError as missing:
+            logging.warning(f"Skipping {pj_tag} / {hospital} / {term}: key {missing} not in Merkliste")
+            return
+        if result_tuple is None:
+            logging.info(f"Not in booking phase: {pj_tag} / {hospital} / {term}")
+            return
         info = f"{result_tuple[0]}/{result_tuple[1]}"
         if result_tuple[0] > 0:
             msg = f"Found something for {pj_tag}, {hospital}, {term}! {info}!"
@@ -229,6 +234,17 @@ def run_main():
             send_push_message(msg=msg)
         else:
             logging.info(f"Nothing found for {pj_tag}, {hospital}, {term}: {info}")
+
+    def run_table_check(table_dict, pj_tag, hospital, term):
+        logging.info("Parsing data from request and checking the table...")
+        logging.info(table_dict)
+        tags       = [x.strip() for x in pj_tag.split(",")   if x.strip()]
+        hospitals  = [x.strip() for x in hospital.split(",") if x.strip()]
+        terms      = [x.strip() for x in term.split(",")     if x.strip()]
+        for t in tags:
+            for h in hospitals:
+                for tm in terms:
+                    check_one(table_dict, t, h, tm)
 
 
     try:

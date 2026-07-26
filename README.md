@@ -72,9 +72,16 @@ That's it. The timer is now running.
 |---|---|---|---|
 | `pjportal_user` | yes | `max.mustermann@uni-muster.de` | Login email for pj-portal.de |
 | `ajax_uid` | yes | `5102130` | See step 2 |
-| `pj_tag` | yes | `Allgemeinmedizin` | Specialty exactly as it appears in "PJ Angebot" → "Krankenhäuser" (`Chirurgie`, `Innere Medizin`, `Anästhesiologie`, …) |
-| `hospital` | yes | `Ulm Universitätsklinikum` | Hospital name exactly as it appears in "Krankenhäuser" (`Berlin Charité`, `Hamburg Univ.`, …) |
-| `term` | yes | `second_term` | One of `first_term`, `second_term`, `third_term` |
+| `pj_tag` | yes | `Chirurgie` or `Chirurgie,Innere Medizin` | Specialty exactly as it appears in "PJ Angebot" → "Krankenhäuser". **Comma-separated list allowed.** |
+| `hospital` | yes | `Ulm Universitätsklinikum` | Hospital name exactly as it appears in "Krankenhäuser". **Comma-separated list allowed.** |
+| `term` | yes | `second_term` or `first_term,second_term,third_term` | One or more of `first_term`, `second_term`, `third_term`. **Comma-separated list allowed.** |
+
+**Multiple watches:** each of the three fields can hold a comma-separated list. The bot checks the Cartesian product of all combinations, silently skips combos that aren't on your Merkliste, and pushes one notification per real match. Example: `pj_tag=Chirurgie,Innere Medizin` × `hospital=Ulm Universitätsklinikum` × `term=first_term,second_term` → 4 checks per tick.
+
+**Environment variables (continued):**
+
+| Variable | Required | Example | Description |
+|---|---|---|---|
 | `cookie_filepath` | no | `/var/lib/pjportal/cookie.txt` | Persistent cookie path. Default is set in `pjportal.env.example` |
 | `cookie_default_value` | no | `901p3g53lo041j4pcl5po5xcws` | Seed cookie used only when no cookie file exists |
 | `pushover_user` | no | `xg7m2vtqnflo5p3zbkydw64cjj8r9s` | Pushover user key |
