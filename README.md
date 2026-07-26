@@ -71,7 +71,6 @@ That's it. The timer is now running.
 | Variable | Required | Example | Description |
 |---|---|---|---|
 | `pjportal_user` | yes | `max.mustermann@uni-muster.de` | Login email for pj-portal.de |
-| `pjportal_pwd` | yes | `super-secure-password1` | Password for pj-portal.de |
 | `ajax_uid` | yes | `5102130` | See step 2 |
 | `pj_tag` | yes | `Allgemeinmedizin` | Specialty exactly as it appears in "PJ Angebot" → "Krankenhäuser" (`Chirurgie`, `Innere Medizin`, `Anästhesiologie`, …) |
 | `hospital` | yes | `Ulm Universitätsklinikum` | Hospital name exactly as it appears in "Krankenhäuser" (`Berlin Charité`, `Hamburg Univ.`, …) |

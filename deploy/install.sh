@@ -78,9 +78,23 @@ if [[ ! -f "$PWD_CRED" ]]; then
   echo "Encrypting your pj-portal.de password with the machine's host key."
   echo "Nothing is written to disk in plaintext — you can't recover this on another machine."
   echo
-  read -rsp "pj-portal.de password: " PJP_PWD
-  echo
-  # Pipe via a heredoc-alike so the plaintext never touches a temp file
+  # Read from /dev/tty so this works when the installer is invoked via `curl | sudo bash`
+  # (in which case stdin is the pipe, not the terminal).
+  if [[ ! -r /dev/tty ]]; then
+    echo "ERROR: no controlling terminal — can't prompt for password." >&2
+    echo "       Re-run the installer directly (not via curl pipe):" >&2
+    echo "         sudo bash /opt/pjportal/deploy/install.sh" >&2
+    exit 1
+  fi
+  PJP_PWD=""
+  while [[ -z "$PJP_PWD" ]]; do
+    read -rsp "pj-portal.de password: " PJP_PWD </dev/tty
+    echo
+    if [[ -z "$PJP_PWD" ]]; then
+      echo "Password cannot be empty. Try again." >&2
+    fi
+  done
+  # Pipe via stdin so the plaintext never touches a temp file
   printf '%s' "$PJP_PWD" | systemd-creds encrypt --name=pjportal_pwd - "$PWD_CRED"
   unset PJP_PWD
   chmod 600 "$PWD_CRED"
