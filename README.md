@@ -109,7 +109,15 @@ sudo bash /opt/pjportal/deploy/install.sh
 ```
 
 ### Testing notifications
-Set `pj_tag`, `hospital`, and `term` to a combination that you know currently has open slots. Then `sudo systemctl start pjportal.service`. You should get a push within a couple of seconds.
+Two ways:
+
+**a) Canary push (recommended first):** proves the push pipeline works without touching pj-portal at all.
+```bash
+sudo -u pjportal /opt/pjportal/.venv/bin/python /opt/pjportal/pjportal.py --test-notify
+```
+Watch `journalctl -u pjportal -n 20 --no-pager` (or the shell output) for `Pushover: sent OK (200)` / `ntfy: sent OK (200)`. Non-200 responses print the API's error body.
+
+**b) End-to-end:** set `pj_tag`, `hospital`, `term` to a combo you know currently has open slots, then `sudo systemctl start pjportal.service`. You should get a push within a couple of seconds.
 
 ## 6. Secret handling
 `install.sh` encrypts your pj-portal.de password with `systemd-creds` (host-key-sealed) and writes the ciphertext to `/etc/pjportal/pjportal_pwd.cred`. The plaintext never lands on disk. At service start systemd decrypts it into `/run/credentials/pjportal.service/pjportal_pwd`, which is a per-service tmpfs — gone when the unit stops.

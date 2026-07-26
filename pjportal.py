@@ -2,7 +2,6 @@ import sys
 import os
 import logging
 import requests
-import http.client, urllib
 from lxml import html
 
 
@@ -205,36 +204,58 @@ def send_push_message(msg):
     pushover_user = ENV_VAR.get('pushover_user')
     pushover_token = ENV_VAR.get('pushover_token')
     ntfy_url_topic = ENV_VAR.get('ntfy_url_topic')
+
+    channels = []
     if pushover_user and pushover_token:
-        send_pushover_notification(msg)
+        channels.append("pushover")
     if ntfy_url_topic:
+        channels.append("ntfy")
+    if not channels:
+        logging.error("NO NOTIFICATION CHANNELS CONFIGURED. Set pushover_user+pushover_token or ntfy_url_topic in /etc/pjportal.env.")
+        return
+
+    logging.info(f"Dispatching push via {', '.join(channels)}: {msg!r}")
+    if "pushover" in channels:
+        send_pushover_notification(msg)
+    if "ntfy" in channels:
         send_ntfy_notification(msg)
-    if not (pushover_user and pushover_token) and not ntfy_url_topic:
-        logging.warning("No credentials for either Pushover or ntfy specified.")
 
 
 def send_pushover_notification(msg):
-    conn = http.client.HTTPSConnection("api.pushover.net:443")
-    conn.request("POST", "/1/messages.json",
-    urllib.parse.urlencode({
-        "token": ENV_VAR['pushover_token'],
-        "user": ENV_VAR['pushover_user'],
-        "message": msg,
-    }), { "Content-type": "application/x-www-form-urlencoded" })
-    response = conn.getresponse()
-    if not response.status == 200:
-        logging.warning(f"Notification failed. Status: {response.status}, Reason: {response.reason}")
+    try:
+        resp = requests.post(
+            "https://api.pushover.net/1/messages.json",
+            data={
+                "token": ENV_VAR['pushover_token'],
+                "user": ENV_VAR['pushover_user'],
+                "message": msg,
+            },
+            timeout=10,
+        )
+    except Exception as e:
+        logging.error(f"Pushover request failed to send: {e}")
+        return
+    if resp.status_code == 200:
+        logging.info(f"Pushover: sent OK ({resp.status_code})")
+    else:
+        logging.error(f"Pushover: FAILED status={resp.status_code} body={resp.text!r}")
 
 
 def send_ntfy_notification(msg):
-    url = f'{ENV_VAR["ntfy_url_topic"]}'
-    headers = {
-        "Title": "Found something on pj-portal.de",
-        "Priority": str(5)
-    }
-    response = requests.post(url, data=msg.encode('utf-8'), headers=headers)
-    if not response.status_code == 200:
-        logging.warning(f"Failed to send notification through ntfy: {response.status_code} - {response.text}")
+    try:
+        resp = requests.post(
+            ENV_VAR["ntfy_url_topic"],
+            data=msg.encode('utf-8'),
+            headers={"Title": "Found something on pj-portal.de", "Priority": "5"},
+            timeout=10,
+        )
+    except Exception as e:
+        logging.error(f"ntfy request failed to send: {e}")
+        return
+    if resp.status_code == 200:
+        logging.info(f"ntfy: sent OK ({resp.status_code})")
+    else:
+        logging.error(f"ntfy: FAILED status={resp.status_code} body={resp.text!r}")
 
 
 def run_main():
@@ -319,6 +340,12 @@ if __name__ == "__main__":
     load_env()
     logging.info("--------------------------------------------")
     logging.info("Script started")
+
+    if "--test-notify" in sys.argv:
+        logging.info("Test-notify mode: sending a canary push and exiting.")
+        send_push_message("PJ-Portal bot test notification — if you see this, the pipeline works.")
+        sys.exit(0)
+
     try:
         run_main()
     except Exception as e:
