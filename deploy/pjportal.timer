@@ -1,0 +1,14 @@
+[Unit]
+Description=Trigger PJ-Portal check with randomized interval
+
+[Timer]
+# Fire 30s after boot, then between 60s and 360s after each previous run
+# (matches the original random.randint(60, 360) behaviour).
+OnBootSec=30s
+OnUnitActiveSec=60s
+RandomizedDelaySec=300s
+Unit=pjportal.service
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target

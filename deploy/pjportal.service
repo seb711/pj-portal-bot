@@ -1,0 +1,21 @@
+[Unit]
+Description=PJ-Portal availability check (one-shot)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=pjportal
+Group=pjportal
+WorkingDirectory=/opt/pjportal
+EnvironmentFile=/etc/pjportal.env
+ExecStart=/opt/pjportal/.venv/bin/python /opt/pjportal/pjportal.py
+StandardOutput=journal
+StandardError=journal
+
+# Sandboxing — network only, no filesystem writes outside state dir
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/pjportal
