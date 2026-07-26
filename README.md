@@ -49,7 +49,7 @@ On the VM:
 
 ```bash
 # One-shot: clones the repo, builds venv, seeds env file, prints next step
-curl -fsSL https://raw.githubusercontent.com/<you>/<repo>/main/deploy/install.sh | sudo REPO=https://github.com/<you>/<repo>.git bash
+curl -fsSL https://raw.githubusercontent.com/seb711/pj-portal-bot/main/deploy/install.sh | sudo bash
 ```
 
 The installer will stop and ask you to fill in credentials:

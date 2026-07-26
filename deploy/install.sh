@@ -10,7 +10,7 @@
 
 set -euo pipefail
 
-REPO=${REPO:-"https://github.com/CHANGEME/pj-portal-bot.git"}
+REPO=${REPO:-"https://github.com/seb711/pj-portal-bot.git"}
 INSTALL_DIR=${INSTALL_DIR:-/opt/pjportal}
 STATE_DIR=${STATE_DIR:-/var/lib/pjportal}
 ENV_FILE=${ENV_FILE:-/etc/pjportal.env}
