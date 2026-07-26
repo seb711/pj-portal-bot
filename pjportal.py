@@ -44,12 +44,37 @@ def _mask(s):
     return f"{s[:4]}…{s[-2:]} (len={len(s)})"
 
 
-def load_env():
+def load_env_file(path="/etc/pjportal.env"):
+    """Populate os.environ from the shared env file for keys not already set.
+
+    Lets the script run either under systemd (which already provides these via
+    EnvironmentFile=) or manually from a shell (where the caller hasn't sourced
+    /etc/pjportal.env). Systemd's values always take precedence because we skip
+    keys already present in the environment.
+    """
+    if not path or not os.path.exists(path):
+        return
+    try:
+        with open(path) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, val = line.partition("=")
+                key = key.strip()
+                if key and key not in os.environ:
+                    os.environ[key] = val.strip()
+    except OSError as e:
+        logging.debug(f"Could not read env file {path}: {e}")
+
+
+def load_env(require_pjportal=True):
     global ENV_VAR
     ENV_VAR = {var_name: read_secret(var_name) for var_name in ENV_VAR_list}
-    missing_vars = [key for key, value in ENV_VAR.items() if key not in ENV_VAR_OPTIONAL and value is None]
-    if missing_vars:
-        raise ValueError(f"Error: Missing required environment variables: {', '.join(missing_vars)}")
+    if require_pjportal:
+        missing_vars = [key for key, value in ENV_VAR.items() if key not in ENV_VAR_OPTIONAL and value is None]
+        if missing_vars:
+            raise ValueError(f"Error: Missing required environment variables: {', '.join(missing_vars)}")
     logging.debug(f"pjportal_user={ENV_VAR['pjportal_user']!r} ajax_uid={ENV_VAR['ajax_uid']!r}")
     logging.debug(f"pj_tag={ENV_VAR['pj_tag']!r} hospital={ENV_VAR['hospital']!r} term={ENV_VAR['term']!r}")
     if ENV_VAR['cookie_filepath'] and os.path.exists(ENV_VAR['cookie_filepath']):
@@ -337,15 +362,17 @@ def run_main():
 
 
 if __name__ == "__main__":
-    load_env()
+    load_env_file()  # no-op under systemd; picks up /etc/pjportal.env for manual runs
     logging.info("--------------------------------------------")
     logging.info("Script started")
 
     if "--test-notify" in sys.argv:
+        load_env(require_pjportal=False)
         logging.info("Test-notify mode: sending a canary push and exiting.")
         send_push_message("PJ-Portal bot test notification — if you see this, the pipeline works.")
         sys.exit(0)
 
+    load_env()
     try:
         run_main()
     except Exception as e:
