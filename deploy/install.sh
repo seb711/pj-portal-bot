@@ -33,6 +33,9 @@ if ! id "$SVC_USER" >/dev/null 2>&1; then
 fi
 
 echo "==> Fetching source into $INSTALL_DIR"
+# The repo is owned by $SVC_USER after the first install, so root's git would
+# refuse to operate on it (dubious-ownership guard). Mark it safe.
+git config --global --add safe.directory "$INSTALL_DIR" >/dev/null 2>&1 || true
 if [[ ! -d "$INSTALL_DIR/.git" ]]; then
   git clone "$REPO" "$INSTALL_DIR"
 else
