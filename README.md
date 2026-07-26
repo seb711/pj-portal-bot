@@ -55,7 +55,7 @@ curl -fsSL https://raw.githubusercontent.com/<you>/<repo>/main/deploy/install.sh
 The installer will stop and ask you to fill in credentials:
 
 ```bash
-sudo nano /etc/pjportal.env
+sudo vim /etc/pjportal.env
 ```
 
 Fill in the env file (see `deploy/pjportal.env.example` for the full schema), then re-run the installer to enable the timer:
