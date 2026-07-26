@@ -36,19 +36,32 @@ def read_secret(name):
     return os.environ.get(name)
 
 
+def _mask(s):
+    """Return a short, log-safe fingerprint of a secret (first 4 + last 2 chars)."""
+    if not s:
+        return "<empty>"
+    if len(s) <= 6:
+        return f"<len={len(s)}>"
+    return f"{s[:4]}…{s[-2:]} (len={len(s)})"
+
+
 def load_env():
     global ENV_VAR
     ENV_VAR = {var_name: read_secret(var_name) for var_name in ENV_VAR_list}
     missing_vars = [key for key, value in ENV_VAR.items() if key not in ENV_VAR_OPTIONAL and value is None]
     if missing_vars:
         raise ValueError(f"Error: Missing required environment variables: {', '.join(missing_vars)}")
+    logging.debug(f"pjportal_user={ENV_VAR['pjportal_user']!r} ajax_uid={ENV_VAR['ajax_uid']!r}")
+    logging.debug(f"pj_tag={ENV_VAR['pj_tag']!r} hospital={ENV_VAR['hospital']!r} term={ENV_VAR['term']!r}")
     if ENV_VAR['cookie_filepath'] and os.path.exists(ENV_VAR['cookie_filepath']):
         with open(ENV_VAR['cookie_filepath'], "r") as file:
             ENV_VAR['cookie_default_value'] = file.read().strip()
-            logging.info(f"Loaded cookie from {ENV_VAR['cookie_filepath']}")
+            logging.info(f"Loaded cookie from {ENV_VAR['cookie_filepath']}: {_mask(ENV_VAR['cookie_default_value'])}")
     elif ENV_VAR['cookie_default_value']:
         logging.info(f"No cookie file at {ENV_VAR['cookie_filepath']}, seeding from cookie_default_value")
         save_cookie(ENV_VAR['cookie_default_value'])
+    else:
+        logging.info(f"No cookie available yet (cookie_filepath={ENV_VAR['cookie_filepath']!r}); will authenticate on first request")
     logging.info("Successfully loaded all required environment variables.")
     return ENV_VAR
 
@@ -106,17 +119,18 @@ def request_open_slots(session, cookie=None):
         "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"
     })
     data = {"AJAX_ID": ENV_VAR["ajax_uid"], "TAB_ID": "Tab_Merkliste"}
-    if cookie: # use preset cookie if available and try authentication 
-        logging.info(f"Using preset cookie to {cookie} and not requesting a new one")
+    if cookie:
+        logging.info(f"Using preset cookie {_mask(cookie)}")
         session.cookies.set("PHPSESSID", cookie)
-    response = session.post("https://www.pj-portal.de/ajax.php", data=data)
-    if response.status_code == 200 and not response.content.decode('utf-8') == '{"HTML":" Antwort kein Handler ","ERRORCLASS":2}':
-        logging.info(f"Request was successful ({response.status_code}): received data from merkliste")
-        return response
     else:
-        logging.warning(f"Request failed with status code {response.status_code}")
-        logging.warning(f"Response Content: {response.content}")
-        raise Exception
+        logging.info("No preset cookie — request will rely on session cookies from login")
+    response = session.post("https://www.pj-portal.de/ajax.php", data=data)
+    body_preview = response.content[:300].decode("utf-8", errors="replace")
+    logging.info(f"AJAX response: status={response.status_code}, bytes={len(response.content)}, preview={body_preview!r}")
+    if response.status_code == 200 and response.content.decode('utf-8') != '{"HTML":" Antwort kein Handler ","ERRORCLASS":2}':
+        return response
+    logging.warning(f"Request failed: status={response.status_code}, body={response.content[:500]!r}")
+    raise Exception("AJAX request rejected — likely stale cookie")
 
 
 
@@ -124,15 +138,30 @@ def extract_table_from_response(response):
 
     parsing_result_dict = {}
 
-    jsonobj = response.json()
+    try:
+        jsonobj = response.json()
+    except Exception as e:
+        logging.warning(f"AJAX body is not JSON: {e}. First 500 bytes: {response.content[:500]!r}")
+        return parsing_result_dict
     htmltable = jsonobj.get("HTML")
+    if not htmltable:
+        logging.warning(f"AJAX JSON has no HTML field. Keys: {list(jsonobj.keys())}. Full body: {response.content[:500]!r}")
+        return parsing_result_dict
+    logging.info(f"HTML payload: {len(htmltable)} chars, preview={htmltable[:200]!r}")
     tree = html.fromstring(htmltable)
     main_xpath = f"/html/body/table/tr"
 
+    all_rows = tree.xpath(main_xpath)
+    class_counts = {}
+    for row in all_rows:
+        cls = row.attrib.get("class", "<no class>")
+        class_counts[cls] = class_counts.get(cls, 0) + 1
+    logging.info(f"Parsed {len(all_rows)} <tr> rows. Class breakdown: {class_counts}")
+
     i = 0
     pj_tag = ""
-    for row in tree.xpath(f"{main_xpath}"):
-        
+    for row in all_rows:
+
         i+=1
         if row.attrib["class"] == "merkliste pj_info_fach":
             cols = row.xpath('.//td')
@@ -165,6 +194,10 @@ def extract_table_from_response(response):
                         parsing_result_dict[pj_tag][hospital][term_desc[tertiar_counter]] = tuple(map(int, slots.split('/')))
                         tertiar_counter += 1
 
+    if not parsing_result_dict:
+        logging.warning("Parsed table is EMPTY — no pj_info_fach rows matched. Session likely unauthenticated.")
+    else:
+        logging.info(f"Parsed {len(parsing_result_dict)} specialty groups: {list(parsing_result_dict.keys())}")
     return parsing_result_dict
 
 
@@ -247,21 +280,36 @@ def run_main():
                     check_one(table_dict, t, h, tm)
 
 
-    try:
+    def do_check():
         response = request_open_slots(session, cookie=ENV_VAR['cookie_default_value'])
         table_dict = extract_table_from_response(response)
+        # A logged-in user with a non-empty Merkliste will always have at least one specialty.
+        # An empty dict means the cookie was accepted at the HTTP layer but the session isn't
+        # actually authenticated — fall through to reauth.
+        if not table_dict:
+            raise Exception("empty merkliste — session not truly authenticated")
         run_table_check(table_dict=table_dict, pj_tag=ENV_VAR["pj_tag"], hospital=ENV_VAR["hospital"], term=ENV_VAR["term"])
+
+    try:
+        do_check()
 
     except IndexError:
         logging.warning("IndexError while parsing response — likely stale cookie or portal layout change.")
         raise
 
-    except Exception:
-        logging.warning("Cookie rejected, re-authenticating.")
+    except Exception as e:
+        logging.warning(f"First attempt failed ({e}); clearing cookies and re-authenticating.")
         session.cookies.clear()
+        # Wipe the on-disk cookie so we don't reuse the bad one next tick
+        if ENV_VAR.get('cookie_filepath') and os.path.exists(ENV_VAR['cookie_filepath']):
+            os.remove(ENV_VAR['cookie_filepath'])
+            logging.info("Removed stale cookie file")
+        ENV_VAR['cookie_default_value'] = None
         session = run_auth(session)
         response = request_open_slots(session)
         table_dict = extract_table_from_response(response)
+        if not table_dict:
+            raise Exception("re-authenticated but merkliste is still empty — check pjportal_user/pjportal_pwd or ajax_uid")
         run_table_check(table_dict=table_dict, pj_tag=ENV_VAR["pj_tag"], hospital=ENV_VAR["hospital"], term=ENV_VAR["term"])
 
     logging.info("Script completed.")
