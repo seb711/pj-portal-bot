@@ -54,6 +54,12 @@ def load_env_file(path="/etc/pjportal.env"):
     """
     if not path or not os.path.exists(path):
         return
+    if not os.access(path, os.R_OK):
+        logging.warning(
+            f"Env file {path} exists but is not readable by the current user "
+            f"(uid={os.getuid()}). Fix: sudo chmod 640 {path}"
+        )
+        return
     try:
         with open(path) as f:
             for line in f:
@@ -65,7 +71,7 @@ def load_env_file(path="/etc/pjportal.env"):
                 if key and key not in os.environ:
                     os.environ[key] = val.strip()
     except OSError as e:
-        logging.debug(f"Could not read env file {path}: {e}")
+        logging.warning(f"Could not read env file {path}: {e}")
 
 
 def load_env(require_pjportal=True):

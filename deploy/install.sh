@@ -65,7 +65,7 @@ if [[ ! -f "$ENV_FILE" ]]; then
 EOF
   exit 0
 fi
-chmod 600 "$ENV_FILE"
+chmod 640 "$ENV_FILE"
 chown root:"$SVC_USER" "$ENV_FILE"
 
 echo "==> Verifying encrypted password credential"
