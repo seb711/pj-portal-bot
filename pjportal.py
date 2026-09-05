@@ -39,7 +39,7 @@ OPTIONAL_KEYS = ("ntfy_url_topic", "cookie_filepath")
 # The class name Slot cells always contain. We match on substring so extra
 # whitespace or reordered modifier tokens (buchungsphase, ausgebucht, …)
 # don't cause silent misses.
-SLOT_CELL_MARKER = "tertial_verfuegbarkeit"
+SLOT_CELL_MARKER = "tertial_angebot_verfuegbarkeit"
 
 ENV: dict[str, str] = {}
 
@@ -291,18 +291,20 @@ def authenticate(session: requests.Session) -> None:
         "Origin": PORTAL_ROOT,
         "Referer": f"{PORTAL_ROOT}/index_uu.php",
     })
-    session.post(f"{PORTAL_ROOT}/index_uu.php", data={
-        "name_Login": "Login",
+    r = session.post(f"{PORTAL_ROOT}/index_uu.php", data={
+        "name_form_login": "form_login",
         "USER_NAME": ENV["pjportal_user"],
         "PASSWORT": ENV["pjportal_pwd"],
-        "form_login_submit": "anmelden",
+        "form_login_buttons": "anmelden",
     })
     auth_cookie = session.cookies.get_dict().get("PHPSESSID")
     if auth_cookie:
         save_cookie(auth_cookie)
-        log.info("Login OK, new cookie saved")
+    if "form_login" in r.text or "PASSWORT" in r.text:
+        log.warning("Login response still shows the login form — auth likely failed "
+                    "(wrong password, or form fields changed again)")
     else:
-        log.warning("Login response had no PHPSESSID — credentials may be wrong")
+        log.info("Login OK, new cookie saved")
 
 
 def fetch_merkliste(session: requests.Session) -> requests.Response:
@@ -313,6 +315,12 @@ def fetch_merkliste(session: requests.Session) -> requests.Response:
         log.info("Using cookie: %s…", cookie[:6])
     else:
         log.info("No cookie set")
+
+    # Actually load the Angebot page first so the server registers the
+    # Merkliste tab/handler for this session — a spoofed Referer alone
+    # isn't enough and produces "kein Handler" from ajax.php.
+    page = session.get(f"{PORTAL_ROOT}/index_uu.php?PAGE_ID=101")
+    log.info("Angebot page GET status=%d bytes=%d", page.status_code, len(page.content))
 
     session.headers.update({
         "Accept": "application/json, text/javascript, */*; q=0.01",
@@ -328,9 +336,11 @@ def fetch_merkliste(session: requests.Session) -> requests.Response:
     log.info("AJAX status=%d bytes=%d", r.status_code, len(r.content))
     log.info("AJAX body preview: %r", r.content[:300].decode("utf-8", errors="replace"))
 
-    bad = '{"HTML":" Antwort kein Handler ","ERRORCLASS":2}'
-    if r.status_code != 200 or r.text == bad:
-        raise RuntimeError(f"AJAX rejected: status={r.status_code} body={r.text[:200]!r}")
+    if r.status_code != 200 or "kein Handler" in r.text:
+        raise RuntimeError(
+            f"AJAX rejected (bad ajax_uid={ENV['ajax_uid']!r}?): "
+            f"status={r.status_code} body={r.text[:200]!r}"
+        )
     return r
 
 
@@ -382,21 +392,21 @@ def parse_merkliste(response: requests.Response) -> dict:
     for row in rows:
         row_cls = row.attrib.get("class", "")
 
-        # --- specialty group header row: "merkliste pj_info_fach ..."
-        if "pj_info_fach" in row_cls:
+        # --- specialty group header row: "... pj_angebot_fach merkliste ..."
+        if "pj_angebot_fach" in row_cls and "krankenhaus" not in row_cls:
             current_tag = _extract_specialty_name(row)
             if current_tag:
                 result.setdefault(current_tag, {})
             continue
 
-        # --- hospital row: "merkliste_krankenhaus"
-        if "merkliste_krankenhaus" in row_cls and current_tag:
+        # --- hospital row: "merkliste pj_angebot_krankenhaus_fach_info"
+        if "pj_angebot_krankenhaus_fach_info" in row_cls and current_tag:
             hospital_name = ""
             term_idx = 0
             for td in row.xpath(".//td"):
                 td_cls = td.attrib.get("class", "")
 
-                if "pj_info_bezeichnung_krankenhaus" in td_cls:
+                if "pj_angebot_krankenhaus_fach" in td_cls:
                     hospital_name = _extract_hospital_name(td)
                     if hospital_name:
                         result[current_tag][hospital_name] = {t: None for t in TERMS}
@@ -408,17 +418,20 @@ def parse_merkliste(response: requests.Response) -> dict:
                     term_idx += 1
 
     if not result:
-        log.warning("Parsed result is EMPTY — session is probably not authenticated")
+        log.warning("Parsed result is EMPTY — session invalid, Merkliste itself "
+                    "is empty, or the site's HTML/class structure changed again")
     else:
         log.info("Found %d specialty groups: %s", len(result), list(result.keys()))
     return result
 
 
 def _extract_specialty_name(row) -> str:
-    """The specialty name lives in a <td class=" "> (single-space class).
-    Fall back to any td whose stripped class is empty."""
+    """The specialty name lives in the <td class="pj_angebot_fach_angabe ...">
+    cell. Fall back to any td whose stripped class is empty, in case the
+    site reverts to the older layout."""
     for td in row.xpath(".//td"):
-        if td.attrib.get("class", "").strip() == "":
+        td_cls = td.attrib.get("class", "")
+        if "pj_angebot_fach_angabe" in td_cls or td_cls.strip() == "":
             texts = [t.strip() for t in td.xpath(".//text()") if t.strip()]
             if texts:
                 return texts[0]
